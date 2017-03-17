@@ -29,36 +29,49 @@ def set_params(mouse, cmd_str='wsad', pace=10, xx=200, yy=200, step=0):
             break
 
 
-def find_obstacle(cx, cy, jx, jy):
-    img = np.array(grab())[cy - 50:cy + 50, cx:cx + 800] / 128
-    if img.sum() > 120000:
+def find_obstacle(cx, cy):
+    img = np.array(grab())[cy - 50:cy + 50, cx:cx + 700, 0] / 128
+    if img.sum() > 35000:
         img = 1 - img
-    hist = img[20:60, :, 0].sum(axis=0)
-    start, end = None, None
+    hist = img.sum(axis=0)
+    obstacles = []
+    owner = 'rex'
     count = 0
-    for i in xrange(30, 800):
+    for i in xrange(700):
         s = hist[i]
         if s > 10:
-            if img[jy-cy+50, jx-cx, 0] == 1:
-                return None
-            if start is None:
-                start = i
-                end = i
-            else:
-                end = i
-        elif start is not None:
+            count = 0
+            if owner == 'desert':
+                owner = 'obstacle'
+                left = i
+        elif owner != 'desert':
             count += 1
             if count >= 15:
-                break
-    return start, end
+                count = 0
+                if owner == 'obstacle':
+                    obstacles.append([left, i-count, 100])
+                owner = 'desert'
+    for obs in obstacles:
+        left, right = obs[:2]
+        h_hist = img[:, left:right].sum(axis=1)
+        count = 0
+        for i in xrange(100-1, -1, -1):
+            if h_hist[i] > 5:
+                if count > 5:
+                    height = 100 - i + count
+                    obs[2] = height
+                    break
+                count += 1
+            else:
+                count = 0
+    return obstacles
 
 
 def autoplay(imgnum):
     keyboard = PyKeyboard()
     mouse = PyMouse()
     # cx, cy = set_params(mouse)
-    cx, cy = 970, 250
-    jx, jy = 1290, 210
+    cx, cy = 350, 260
     mouse.click(10, 100)
     time.sleep(0.1)
     keyboard.tap_key(keyboard.up_key)
@@ -66,37 +79,59 @@ def autoplay(imgnum):
     # keyboard.tap_key(keyboard.alt_key)  # pause
 
     prev_dist = None
-    speed_record = deque([400, 400, 400])
+    speed_record = deque([400] * 7)
     start_t = time.time()
     prev_t = 0
+    n_jump = 0
+    obstacles = None
+    n_retry = 0
     while True:
-        keyboard.press_key(keyboard.down_key)
-        obstacle = find_obstacle(cx, cy, jx, jy)
-        if obstacle is None:
-            print 'oops'
-            break
-        elif obstacle[0] is None:
+        snap = obstacles
+        obstacles = find_obstacle(cx, cy)
+        # print 'obstacles =', obstacles
+        if not obstacles:
             prev_dist = None
             time.sleep(0.1)
         else:
             current_t = time.time() - start_t
-            start, end = obstacle
+            start, end, height = obstacles[0]
             if prev_dist is not None:
                 speed = (prev_dist - start) / (current_t - prev_t)
+                if speed < 1:
+                    print 'oops'
+                    print snap
+                    n_retry += 1
+                    if n_retry > 3:
+                        return time.time() - start_t
+                    time.sleep(0.005 * n_retry)
+                    continue
                 speed_record.popleft()
                 speed_record.append(speed)
             prev_dist = start
             prev_t = current_t
-            ave_speed = sum(speed_record) / 3.0
-            print 'speed =', ave_speed
-            if start < ave_speed * 0.2 + 60:
-                keyboard.release_key(keyboard.down_key)
-                keyboard.tap_key(keyboard.up_key)  # jump
-                print 'jump', start, end/ave_speed
-                time.sleep(end / ave_speed)
-                prev_dist = None
+            ave_speed = (sum(speed_record) - max(speed_record) - min(speed_record)) / 5.0
+            # print 'speed =', ave_speed
+            if start < ave_speed * 0.36:
+                if height < 60:
+                    n_jump += 1
+                    keyboard.tap_key(keyboard.up_key)  # jump
+                    # print 'jump', start, end, height
+                    if n_jump < 30 and end - start > 50:
+                        time.sleep(end / ave_speed - 0.05 + (30-n_jump) * 0.005)
+                    else:
+                        time.sleep(end / ave_speed - 0.05)
+                    keyboard.press_key(keyboard.down_key)  # land
+                    time.sleep(0.13)
+                    keyboard.release_key(keyboard.down_key)
+                    prev_dist = None
+                else:
+                    keyboard.press_key(keyboard.down_key)
+                    # print 'dodge', start, end, height
+                    time.sleep(end / ave_speed + 0.01)
+                    keyboard.release_key(keyboard.down_key)
+                    prev_dist = None
 
 
-for i in range(1):
-    autoplay(i)
-    time.sleep(1)
+for i in range(10):
+    print autoplay(i)
+    time.sleep(10)
