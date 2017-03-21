@@ -2,7 +2,9 @@ from collections import deque
 from pykeyboard import PyKeyboard
 from pymouse import PyMouse
 from PIL.ImageGrab import grab
+from PIL import ImageFilter
 from msvcrt import getch
+from sklearn.cluster import KMeans
 import numpy as np
 import time
 
@@ -29,15 +31,45 @@ def set_params(mouse, cmd_str='wsad', pace=10, xx=200, yy=200, step=0):
             break
 
 
-def find_obstacle(cx, cy):
-    img = np.array(grab())[cy - 50:cy + 50, cx:cx + 700, 0] / 128
-    if img.sum() > 35000:
+def find_rex(mouse, keyboard):
+    mouse.click(10, 100)
+    time.sleep(0.1)
+    keyboard.tap_key(keyboard.up_key)
+    time.sleep(0.5)
+    img = grab()
+    img = img.filter(ImageFilter.MinFilter(3))
+    rex_on_ground = np.array(img)[:, :, 0] / 128
+    time.sleep(0.1)
+    keyboard.tap_key(keyboard.up_key)
+    time.sleep(0.05)
+    img = grab()
+    img = img.filter(ImageFilter.MinFilter(3))
+    rex_jump = np.array(img)[:, :, 0] / 128
+    diff = zip(*np.where(rex_on_ground != rex_jump))
+    km = KMeans(n_clusters=2).fit(diff)
+    centers = [list(s) for s in km.cluster_centers_[:, [1, 0]]]
+    centers.sort()
+    x, y = [int(s) for s in centers[0]]
+    time.sleep(1)
+    radius = 50
+    rex_pixels = np.array(zip(*np.where(rex_on_ground[y-radius:y+radius, x-radius:x+radius] != 1)))
+    rex_center = rex_pixels.mean(axis=0)
+    dy, dx = [int(round(s - radius)) for s in rex_center]
+    cy = y + dy
+    cx = x + dx
+    w = min(800, rex_on_ground.shape[1] - cx)
+    return cx, cy, w
+
+
+def find_obstacle(cx, cy, w):
+    img = np.array(grab())[cy - 50:cy + 50, cx:cx + w, 0] / 128
+    if img.sum() * 2 > w * 100:
         img = 1 - img
     hist = img.sum(axis=0)
     obstacles = []
     owner = 'rex'
     count = 0
-    for i in xrange(700):
+    for i in xrange(w):
         s = hist[i]
         if s > 10:
             count = 0
@@ -70,13 +102,9 @@ def find_obstacle(cx, cy):
 def autoplay(imgnum):
     keyboard = PyKeyboard()
     mouse = PyMouse()
-    # cx, cy = set_params(mouse)
-    cx, cy = 350, 260
     mouse.click(10, 100)
-    time.sleep(0.1)
-    keyboard.tap_key(keyboard.up_key)
-    time.sleep(3)
-    # keyboard.tap_key(keyboard.alt_key)  # pause
+    cx, cy, w = find_rex(mouse, keyboard)
+    time.sleep(1)
 
     prev_dist = None
     speed_record = deque([400] * 7)
@@ -87,7 +115,7 @@ def autoplay(imgnum):
     n_retry = 0
     while True:
         snap = obstacles
-        obstacles = find_obstacle(cx, cy)
+        obstacles = find_obstacle(cx, cy, w)
         # print 'obstacles =', obstacles
         if not obstacles:
             prev_dist = None
